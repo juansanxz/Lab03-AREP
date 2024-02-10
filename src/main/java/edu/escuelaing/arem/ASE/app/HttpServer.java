@@ -15,6 +15,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class HttpServer {
 
     private static String currentQuery = null;
+
+    private static String location = null;
     private static HttpServer _instance = new HttpServer();
     private static String route = "";
     private static Map<String, WebService> services = new HashMap<String, WebService>();
@@ -55,13 +57,35 @@ public class HttpServer {
             outputLine = null;
 
             boolean firstLine = true;
+            boolean readyToReadBody = false;
             String uriStr = "";
+            String method = "";
+            String requestBody = "";
 
             while ((inputLine = in.readLine()) != null) {
                 if(firstLine){
+                    method = inputLine.split(" ")[0];
                     uriStr = inputLine.split(" ")[1];
                     firstLine = false;
                 }
+                if (method.equals("POST")) {
+                    // Lee el encabezado Content-Length para determinar la longitud del cuerpo de la solicitud
+                    int contentLength = -1;
+                    while ((inputLine = in.readLine()) != null && !inputLine.isEmpty()) {
+
+                        if (inputLine.startsWith("Content-Length:")) {
+                            contentLength = Integer.parseInt(inputLine.split(" ")[1]);
+                        }
+                    }
+
+                    if (contentLength > 0) {
+                        char[] body = new char[contentLength];
+                        in.read(body, 0, contentLength);
+                        requestBody = new String(body);
+                    }
+                }
+
+
                 System.out.println("Received: " + inputLine);
                 if (!in.ready()) {
                     break;
@@ -69,40 +93,31 @@ public class HttpServer {
             }
 
             URI fileUri = new URI(uriStr);
-
+            outputLine = httpErrorNotFound();
             String path = fileUri.getPath();
-            if (path.startsWith("/action")){
-                String webUri = path.replace("/action", "");
+
+            if (path.startsWith(location)){
+                String webUri = path.replace(location, "");
                 if (services.containsKey(webUri)) {
-                // QUitar query
-                    outputLine = services.get(webUri).handle();
-                }
-            } else if (uriStr.startsWith("/movie?t=")){
-                // If client is asking for a movie
-                currentQuery = fileUri.getQuery();
-                outputLine = httpRequestTextFiles("/movieInfo.html");
-            } else if (uriStr.startsWith("/movieData")) {
-                // When client asks for the movie´s information to complete the table
-                outputLine = ExternalRestApiConnection.movieDataService(currentQuery);
-
-                if (outputLine == null) {
-                    outputLine = httpErrorNotFound();
-                }
-
-            } else if (uriStr.startsWith("/jpeg")){
-                // When client asks for an image
-                OutputStream outputForImage = clientSocket.getOutputStream();
-                httpRequestImage(fileUri.getPath(), outputForImage);
-                outputLine = null;
-
-            } else {
-                // When client asks for a text file
-                outputLine = httpErrorNotFound();
-
-                try{
-                    outputLine = httpRequestTextFiles(fileUri.getPath());
-                } catch(Exception e){
-                    e.printStackTrace();
+                    HttpRequest request = new HttpRequest(method, fileUri, requestBody);
+                    HttpResponse response = new HttpResponse();
+                    outputLine = services.get(webUri).handle(request, response);
+                    if(!outputLine.contains("HTTP/1.1")){
+                        if (response.getHeaders().get("Content-Type").equals("application/json")) {
+                            outputLine = buildJsonHeader() + outputLine;
+                        }
+                    }
+                } else if (webUri.startsWith("/jpeg")){
+                    // When client asks for an image
+                    OutputStream outputForImage = clientSocket.getOutputStream();
+                    httpRequestImage(webUri, outputForImage);
+                    outputLine = null;
+                } else {
+                    try{
+                        outputLine = httpRequestTextFiles(webUri);
+                    } catch(Exception e){
+                        e.printStackTrace();
+                    }
                 }
             }
 
@@ -142,7 +157,7 @@ public class HttpServer {
      * @throws IOException
      */
     public static void httpRequestImage(String requestedFile, OutputStream outputStream) throws IOException {
-        Path file = Paths.get("target/classes/public" + requestedFile);
+        Path file = Paths.get("target/classes" + location + requestedFile);
         byte[] buffer = new byte[1024]; // Tamaño del buffer
         try (InputStream inputStream = Files.newInputStream(file)) {
             String header = "HTTP/1.1 200 OK\r\n" +
@@ -165,21 +180,20 @@ public class HttpServer {
      */
     public static String httpRequestTextFiles(String requestedFile) throws IOException {
         Charset charset = Charset.forName("UTF-8");
-        Path file = Paths.get("target/classes/public" + requestedFile);
+        Path file = Paths.get("target/classes/" + location + requestedFile);
         BufferedReader reader = Files.newBufferedReader(file, charset);
         String line = null;
-        String outputLine = "HTTP/1.1 200 OK\r\n";
+        String outputLine = null;
         String extension = requestedFile.split("\\.")[1];
 
         if (extension.equals("html")) {
-           outputLine = outputLine + "Content-Type:text/html; charset=utf-8\r\n";
+           outputLine = buildHTMLHeader();
         } else if (extension.equals("js")) {
-            outputLine = outputLine + "Content-Type:application/javascript; charset=utf-8\r\n";
+            outputLine = buildJsHeader();
         } else if (extension.equals(("css"))){
-            outputLine = outputLine + "Content-Type:text/css; charset=utf-8\r\n";
+            outputLine = buildCssHeader();
         }
 
-        outputLine = outputLine + "\r\n";
 
         while ((line = reader.readLine()) != null) {
             System.out.println(line);
@@ -194,5 +208,48 @@ public class HttpServer {
         services.put(r, s);
     }
 
+
+    public static String buildHTMLHeader () {
+        String header = "HTTP/1.1 200 OK\r\n" +
+                "Content-Type:text/html; charset=utf-8\r\n"
+                + "\r\n";
+        return header;
+    }
+
+    public static String buildJsHeader () {
+        String header = "HTTP/1.1 200 OK\r\n" +
+                "Content-Type:application/javascript; charset=utf-8\r\n"
+                + "\r\n";
+        return header;
+    }
+
+    public static String buildJsonHeader () {
+        String header = "HTTP/1.1 200 OK\r\n" +
+                "Content-Type:application/json; charset=utf-8\r\n"
+                + "\r\n";
+        return header;
+    }
+
+    public static String buildCssHeader () {
+        String header = "HTTP/1.1 200 OK\r\n" +
+                "Content-Type:text/css; charset=utf-8\r\n"
+                + "\r\n";
+        return header;
+    }
+
+    public static String httpResponseCreated() {
+        String response = "HTTP/1.1 201 Created\r\n" +
+                "Content-Type: text/html\r\n" +
+                "\r\n";
+        return response;
+    }
+
+    public static void location(String fileLocation) {
+        location = fileLocation;
+    }
+
+    public static void post(String r, WebService s) {
+        services.put(r, s);
+    }
 
 }

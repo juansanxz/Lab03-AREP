@@ -5,9 +5,9 @@ function loadGetMsg() {
         xhttp.onload = function() {
            console.log(this.status);
            if (this.status === 200) {
-               window.location.href = "/movie?t="+movieTitle;
+               window.location.href = "/public/movie?t="+movieTitle;
            }
         }
-        xhttp.open("GET", "/movie?t="+movieTitle);
+        xhttp.open("GET", "/public/movie?t="+movieTitle);
         xhttp.send();
 }

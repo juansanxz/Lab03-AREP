@@ -17,7 +17,7 @@ xhttp.onload = function() {
          }
     }
 }
-xhttp.open("GET", "/movieData");
+xhttp.open("GET", "/public/movieData");
 xhttp.send();
   // Function to add a row
 function addRow(table, key, value) {

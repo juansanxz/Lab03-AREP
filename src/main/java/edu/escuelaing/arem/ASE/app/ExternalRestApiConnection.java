@@ -68,10 +68,7 @@ public class ExternalRestApiConnection {
         if (movieData.contains("Movie not found")) {
             outputLine = null;
         } else {
-            outputLine = "HTTP/1.1 200 OK\r\n"
-                    + "Content-Type:application/json; charset=utf-8\r\n"
-                    + "\r\n"
-                    + movieData;
+            outputLine = movieData;
         }
         return outputLine;
     }
